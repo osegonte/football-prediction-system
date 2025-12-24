@@ -1,167 +1,169 @@
-from typing import List, Dict, Optional
+from typing import List, Dict
+from datetime import datetime
 import logging
 import sys
 import os
 
-# Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scrapers.base_scraper import BaseSofascoreScraper
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class TeamStatsScraper(BaseSofascoreScraper):
-    """Scraper dedicated to fetching team statistics and historical data."""
+    """Scraper for fetching team historical match data."""
     
-    def get_team_form(self, team_id: int, limit: int = 10) -> List[Dict]:
-        """Get team's recent match results."""
-        endpoint = f"/team/{team_id}/events/last/{limit}"
+    def get_team_last_matches(self, team_id: int, limit: int = 10) -> Dict:
+        """
+        Get team's last N finished matches using events/last endpoint.
+        """
+        endpoint = f"/team/{team_id}/events/last/0"  # 0 gets recent matches
         
-        logger.info(f"Fetching last {limit} matches for team {team_id}")
+        logger.info(f"Fetching recent matches for team {team_id}")
         data = self._make_request(endpoint)
         
-        if data and 'events' in data:
-            return self._parse_team_form(data['events'], team_id)
+        if not data or 'events' not in data:
+            logger.error(f"Failed to fetch data for team {team_id}")
+            return None
         
-        return []
-    
-    def get_team_statistics(self, team_id: int, tournament_id: int, season_id: Optional[int] = None) -> Dict:
-        """Get comprehensive team statistics for a tournament/season."""
-        if season_id:
-            endpoint = f"/team/{team_id}/tournament/{tournament_id}/season/{season_id}/statistics"
-        else:
-            endpoint = f"/team/{team_id}/unique-tournament/{tournament_id}/season/current/statistics/overall"
+        events = data['events']
         
-        logger.info(f"Fetching statistics for team {team_id} in tournament {tournament_id}")
-        data = self._make_request(endpoint)
+        if not events:
+            return None
         
-        if data and 'statistics' in data:
-            return self._parse_team_statistics(data['statistics'])
+        # Get team name
+        first_event = events[0]
+        home_team = first_event.get('homeTeam', {})
+        away_team = first_event.get('awayTeam', {})
+        team_name = home_team.get('name') if home_team.get('id') == team_id else away_team.get('name')
         
-        return {}
-    
-    def _parse_team_form(self, events: List, team_id: int) -> List[Dict]:
-        """Parse team form from events."""
-        form = []
+        # Parse and filter only FINISHED matches
+        matches = []
         for event in events:
-            home_team = event.get('homeTeam', {})
-            away_team = event.get('awayTeam', {})
-            home_score = event.get('homeScore', {}).get('current', 0)
-            away_score = event.get('awayScore', {}).get('current', 0)
-            
-            is_home = home_team.get('id') == team_id
-            team_score = home_score if is_home else away_score
-            opponent_score = away_score if is_home else home_score
-            
-            if team_score > opponent_score:
-                result = 'W'
-            elif team_score < opponent_score:
-                result = 'L'
-            else:
-                result = 'D'
-            
-            form_data = {
-                'match_id': event.get('id'),
-                'date': event.get('startTimestamp'),
-                'opponent': away_team.get('name') if is_home else home_team.get('name'),
-                'opponent_id': away_team.get('id') if is_home else home_team.get('id'),
-                'venue': 'H' if is_home else 'A',
-                'team_score': team_score,
-                'opponent_score': opponent_score,
-                'result': result,
-                'total_goals': team_score + opponent_score,
-                'tournament': event.get('tournament', {}).get('name'),
-            }
-            form.append(form_data)
-            
-        return form
-    
-    def _parse_team_statistics(self, stats: Dict) -> Dict:
-        """Parse team statistics into a clean format."""
-        return {
-            'matches_played': stats.get('matches', 0),
-            'wins': stats.get('wins', 0),
-            'draws': stats.get('draws', 0),
-            'losses': stats.get('losses', 0),
-            'goals_scored': stats.get('goalsScored', 0),
-            'goals_conceded': stats.get('goalsConceded', 0),
-            'clean_sheets': stats.get('cleanSheets', 0),
-            'btts_count': stats.get('bothTeamsScore', 0),
-            'avg_goals_scored': stats.get('goalsScored', 0) / max(stats.get('matches', 1), 1),
-            'avg_goals_conceded': stats.get('goalsConceded', 0) / max(stats.get('matches', 1), 1),
-        }
-    
-    def calculate_team_metrics(self, form_data: List[Dict]) -> Dict:
-        """Calculate betting-relevant metrics from form data."""
-        if not form_data:
-            return {}
+            status = event.get('status', {}).get('type')
+            if status == 'finished':
+                match_data = self._parse_match(event, team_id)
+                if match_data:
+                    matches.append(match_data)
         
-        total_matches = len(form_data)
-        wins = sum(1 for m in form_data if m['result'] == 'W')
-        draws = sum(1 for m in form_data if m['result'] == 'D')
-        losses = sum(1 for m in form_data if m['result'] == 'L')
-        
-        goals_scored = sum(m['team_score'] for m in form_data)
-        goals_conceded = sum(m['opponent_score'] for m in form_data)
-        
-        over_15 = sum(1 for m in form_data if m['total_goals'] > 1.5)
-        over_25 = sum(1 for m in form_data if m['total_goals'] > 2.5)
-        over_35 = sum(1 for m in form_data if m['total_goals'] > 3.5)
-        
-        btts = sum(1 for m in form_data if m['team_score'] > 0 and m['opponent_score'] > 0)
-        clean_sheets = sum(1 for m in form_data if m['opponent_score'] == 0)
+        # Sort by date (most recent first)
+        matches.sort(key=lambda x: x['timestamp'], reverse=True)
         
         return {
-            'total_matches': total_matches,
-            'wins': wins,
-            'draws': draws,
-            'losses': losses,
-            'win_rate': (wins / total_matches) * 100,
-            'goals_scored': goals_scored,
-            'goals_conceded': goals_conceded,
-            'avg_goals_scored': goals_scored / total_matches,
-            'avg_goals_conceded': goals_conceded / total_matches,
-            'over_15_percentage': (over_15 / total_matches) * 100,
-            'over_25_percentage': (over_25 / total_matches) * 100,
-            'over_35_percentage': (over_35 / total_matches) * 100,
-            'btts_percentage': (btts / total_matches) * 100,
-            'clean_sheet_percentage': (clean_sheets / total_matches) * 100,
+            'team_id': team_id,
+            'team_name': team_name,
+            'matches': matches[:limit]
         }
+    
+    def _parse_match(self, event: Dict, team_id: int) -> Dict:
+        """Parse a single match into clean format."""
+        home_team = event.get('homeTeam', {})
+        away_team = event.get('awayTeam', {})
+        home_score = event.get('homeScore', {}).get('current')
+        away_score = event.get('awayScore', {}).get('current')
+        
+        # Skip if no scores available
+        if home_score is None or away_score is None:
+            return None
+        
+        # Determine if our team was home or away
+        is_home = home_team.get('id') == team_id
+        
+        if is_home:
+            opponent = away_team.get('name')
+            opponent_id = away_team.get('id')
+            team_score = home_score
+            opponent_score = away_score
+            venue = 'Home'
+        else:
+            opponent = home_team.get('name')
+            opponent_id = home_team.get('id')
+            team_score = away_score
+            opponent_score = home_score
+            venue = 'Away'
+        
+        # Determine result
+        if team_score > opponent_score:
+            result = 'W'
+        elif team_score < opponent_score:
+            result = 'L'
+        else:
+            result = 'D'
+        
+        # Get match date - properly handle timestamp
+        timestamp = event.get('startTimestamp')
+        if timestamp:
+            # Convert Unix timestamp to datetime
+            dt = datetime.fromtimestamp(timestamp)
+            match_date = dt.strftime('%d.%m.%Y')
+            match_year = dt.year
+        else:
+            match_date = 'Unknown'
+            match_year = 0
+        
+        return {
+            'match_id': event.get('id'),
+            'date': match_date,
+            'timestamp': timestamp,  # Keep for sorting
+            'year': match_year,
+            'opponent': opponent,
+            'opponent_id': opponent_id,
+            'venue': venue,
+            'team_score': team_score,
+            'opponent_score': opponent_score,
+            'result': result,
+            'tournament': event.get('tournament', {}).get('name', 'Unknown'),
+            'tournament_id': event.get('tournament', {}).get('id')
+        }
+    
+    def display_team_data(self, team_data: Dict):
+        """Display team historical data in clean format."""
+        if not team_data:
+            print("❌ No data available")
+            return
+        
+        team_name = team_data['team_name']
+        matches = team_data['matches']
+        
+        print("\n" + "="*80)
+        print(f"🏆 TEAM: {team_name.upper()}")
+        print(f"📊 Team ID: {team_data['team_id']}")
+        print("="*80)
+        
+        if not matches:
+            print("❌ No finished matches found")
+            return
+        
+        print(f"\n📅 LAST {len(matches)} FINISHED MATCHES (Most Recent First):\n")
+        
+        for i, match in enumerate(matches, 1):
+            result_emoji = "✅" if match['result'] == 'W' else "❌" if match['result'] == 'L' else "➖"
+            
+            print(f"Match {i}: {match['date']} (Year: {match['year']})")
+            print(f"  {result_emoji} {match['result']} | {match['team_score']}-{match['opponent_score']} vs {match['opponent']} ({match['venue']})")
+            print(f"  Tournament: {match['tournament']}")
+            print(f"  Match ID: {match['match_id']}")
+            print()
 
-# Test function
-def test_team_stats_scraper():
-    """Test the team stats scraper independently."""
+
+def test_newcastle():
+    """Test with Newcastle United (Team ID: 39)."""
     scraper = TeamStatsScraper()
     
-    # Test with a known team ID (50 is Brentford from your previous test)
-    team_id = 50
+    print("\n" + "🔍 TEAM HISTORICAL DATA SCRAPER TEST".center(80))
+    print("="*80)
+    print("Testing with: Newcastle United (ID: 39)")
+    print("Expected: Most recent match should be 06.12.2024 vs Brentford 2-1")
+    print("="*80)
     
-    print(f"\n{'='*50}")
-    print(f"Testing Team Stats Scraper")
-    print(f"{'='*50}\n")
+    team_data = scraper.get_team_last_matches(team_id=39, limit=10)
+    scraper.display_team_data(team_data)
     
-    # Get team form
-    form = scraper.get_team_form(team_id, limit=5)
-    
-    if form:
-        print(f"✅ Successfully fetched last {len(form)} matches\n")
-        
-        # Show match results
-        print("Recent Form:")
-        for match in form:
-            result_symbol = "✅" if match['result'] == 'W' else "❌" if match['result'] == 'L' else "➖"
-            print(f"  {result_symbol} {match['result']} - {match['team_score']}-{match['opponent_score']} vs {match['opponent']} ({match['venue']})")
-        
-        # Calculate and show metrics
-        print("\n📊 Calculated Metrics:")
-        metrics = scraper.calculate_team_metrics(form)
-        print(f"  Win Rate: {metrics['win_rate']:.1f}%")
-        print(f"  Avg Goals Scored: {metrics['avg_goals_scored']:.2f}")
-        print(f"  Avg Goals Conceded: {metrics['avg_goals_conceded']:.2f}")
-        print(f"  Over 2.5 Goals: {metrics['over_25_percentage']:.1f}%")
-        print(f"  BTTS: {metrics['btts_percentage']:.1f}%")
-    else:
-        print("❌ No form data found")
+    print("\n" + "="*80)
+    print("✅ Scraper test complete")
+    print("="*80 + "\n")
+
 
 if __name__ == "__main__":
-    test_team_stats_scraper()
+    test_newcastle()

@@ -1,47 +1,29 @@
-import requests
-import time
 import logging
 from typing import Optional, Dict, Any
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.request_manager import RequestManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class BaseSofascoreScraper:
     """Base class for all Sofascore scrapers with common functionality."""
     
-    def __init__(self, delay: float = 1.0):
+    def __init__(self):
         self.base_url = "https://api.sofascore.com/api/v1"
-        self.delay = delay
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.sofascore.com/',
-            'Cache-Control': 'no-cache',
-        })
+        self.request_manager = RequestManager()
+        logger.info(f"{self.__class__.__name__} initialized with RequestManager")
         
     def _make_request(self, endpoint: str, params: dict = None) -> Optional[dict]:
-        """Make a request with error handling and retry logic."""
+        """
+        Make a request using the intelligent RequestManager.
+        All anti-ban protections are automatically applied.
+        """
         url = f"{self.base_url}{endpoint}"
-        max_retries = 3
-        
-        for attempt in range(max_retries):
-            try:
-                time.sleep(self.delay)
-                response = self.session.get(url, params=params, timeout=10)
-                
-                if response.status_code == 200:
-                    return response.json()
-                elif response.status_code == 429:
-                    logger.warning(f"Rate limited, waiting {self.delay * 3} seconds...")
-                    time.sleep(self.delay * 3)
-                else:
-                    logger.error(f"Request failed with status {response.status_code} for {endpoint}")
-                    
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Request error for {endpoint}: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(self.delay * 2)
-                    
-        return None
+        return self.request_manager.make_request(url, params=params)
