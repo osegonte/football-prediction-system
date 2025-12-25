@@ -22,7 +22,7 @@ BATCH_PAUSE = 120  # Wait 2 minutes between batches (seconds)
 # TEAM HISTORY SETTINGS
 # ============================================================================
 
-DEFAULT_MATCHES_PER_TEAM = 10  # How many past matches to fetch per team
+DEFAULT_MATCHES_PER_TEAM = 20  # How many past matches to fetch per team (UPDATED: 10 → 20)
 
 # ============================================================================
 # VPN SETTINGS (Optional - Set to True when ready)
