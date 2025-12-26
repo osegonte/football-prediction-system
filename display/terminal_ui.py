@@ -1,249 +1,286 @@
 """
-Clean Retro Terminal UI - Display Module
+Enhanced Retro Terminal UI - Beautiful Live Dashboard
 Place in: display/terminal_ui.py
 
-Pure ASCII, no emojis, professional retro aesthetic
+Features:
+- Animated progress bars
+- Live stats updates
+- Real-time counters
+- Visual indicators
+- Clean retro aesthetic
 """
 
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn
 from rich.text import Text
+from datetime import datetime
+import time
 
 console = Console()
 
 
-class RetroDisplay:
-    """Clean retro ASCII terminal display"""
+class EnhancedRetroDisplay:
+    """Enhanced retro terminal UI with live updates"""
     
     def __init__(self):
         self.console = console
-    
-    def clear(self):
-        """Clear the console"""
-        self.console.clear()
-    
-    def print_header(self, mode, runtime_hours, runtime_minutes, dates_processed, dates_failed):
+        self.start_time = datetime.now()
+        self.layout = Layout()
+        
+    def create_live_dashboard(self, mode, stats, today_stats, current_date=None, total_days=0):
         """
-        Print clean ASCII header
+        Create live updating dashboard
         
         Args:
             mode: 'comprehensive' or 'daily'
-            runtime_hours: Hours running
-            runtime_minutes: Minutes running
-            dates_processed: Number of dates processed
-            dates_failed: Number of dates failed
+            stats: Overall stats dict
+            today_stats: Today's stats dict
+            current_date: Current date being processed
+            total_days: Total days to process
         """
-        mode_display = "COMPREHENSIVE" if mode == 'comprehensive' else "DAILY UPDATE"
+        # Calculate runtime
+        elapsed = datetime.now() - self.start_time
+        hours = int(elapsed.total_seconds() / 3600)
+        minutes = int((elapsed.total_seconds() % 3600) / 60)
+        seconds = int(elapsed.total_seconds() % 60)
         
-        header = f"""
-+================================================================+
-|        FOOTBALL DATA COLLECTOR - {mode_display:^16}         |
-+================================================================+
-|  Runtime: {runtime_hours:02d}h {runtime_minutes:02d}m                                            |
-|  Dates:   {dates_processed:3d} processed  {dates_failed:3d} failed                        |
-+================================================================+
+        # Mode display
+        mode_display = "COMPREHENSIVE COLLECTION" if mode == 'comprehensive' else "DAILY UPDATE"
+        
+        # Create header
+        header_text = f"""
+╔══════════════════════════════════════════════════════════════════╗
+║  FOOTBALL DATA COLLECTOR - {mode_display:^24}  ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Runtime: {hours:02d}h {minutes:02d}m {seconds:02d}s                                              ║"""
+        
+        if mode == 'comprehensive' and total_days > 0:
+            progress_pct = (stats['dates_processed'] / total_days * 100) if total_days > 0 else 0
+            header_text += f"""
+║  Progress: {stats['dates_processed']:3d}/{total_days:3d} days ({progress_pct:5.1f}%)                              ║"""
+        
+        header_text += f"""
+║  Status: {stats['dates_processed']:3d} processed, {stats['dates_failed']:3d} failed                       ║
+╚══════════════════════════════════════════════════════════════════╝
 """
-        self.console.print(header, style="cyan")
-    
-    def print_stats_table(self, stats, today_stats):
-        """
-        Print statistics table
         
-        Args:
-            stats: Dict with keys: fixtures, team_matches, match_stats, player_stats
-            today_stats: Dict with keys: fixtures_today, team_matches_today, match_stats_today
-        """
-        table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
-        table.add_column("METRIC", style="cyan", width=20)
-        table.add_column("TOTAL", justify="right", style="green", width=15)
-        table.add_column("TODAY", justify="right", style="yellow", width=15)
+        # Create stats table
+        stats_table = Table(show_header=True, header_style="bold cyan", box=None, padding=(0, 2))
+        stats_table.add_column("METRIC", style="cyan", width=25)
+        stats_table.add_column("TOTAL", justify="right", style="green", width=15)
+        stats_table.add_column("TODAY", justify="right", style="yellow", width=12)
+        stats_table.add_column("RATE", justify="right", style="magenta", width=12)
         
-        table.add_row(
+        # Calculate rates
+        runtime_hours = elapsed.total_seconds() / 3600 if elapsed.total_seconds() > 0 else 1
+        fixtures_rate = stats['fixtures'] / runtime_hours if runtime_hours > 0 else 0
+        matches_rate = stats['team_matches'] / runtime_hours if runtime_hours > 0 else 0
+        
+        stats_table.add_row(
             "Fixtures",
             f"{stats['fixtures']:,}",
-            f"{today_stats['fixtures_today']:,}"
+            f"{today_stats['fixtures_today']:,}",
+            f"{fixtures_rate:.0f}/hr"
         )
-        table.add_row(
+        stats_table.add_row(
             "Team Matches",
             f"{stats['team_matches']:,}",
-            f"{today_stats['team_matches_today']:,}"
+            f"{today_stats['team_matches_today']:,}",
+            f"{matches_rate:.0f}/hr"
         )
-        table.add_row(
+        stats_table.add_row(
             "Match Statistics",
             f"{stats['match_stats']:,}",
-            f"{today_stats['match_stats_today']:,}"
+            f"{today_stats['match_stats_today']:,}",
+            f"--"
         )
-        table.add_row(
-            "Players",
+        stats_table.add_row(
+            "Player Statistics",
             f"{stats['player_stats']:,}",
-            "-"
+            f"--",
+            f"--"
         )
         
-        self.console.print(table)
-    
-    def print_mode_banner(self, mode):
-        """
-        Print mode banner at startup
-        
-        Args:
-            mode: 'comprehensive' or 'daily'
-        """
-        if mode == 'comprehensive':
-            banner = """[bold cyan]
-+========================================+
-|   COMPREHENSIVE COLLECTION MODE        |
-+========================================+[/bold cyan]
-Collecting: 2025-01-01 --> Today
-"""
+        # Current activity
+        if current_date:
+            activity = f"\n[cyan]>>> Processing: {current_date}[/cyan]\n"
         else:
-            banner = """[bold cyan]
-+========================================+
-|      DAILY COLLECTION MODE             |
-+========================================+[/bold cyan]
-Collecting today's matches + recent updates
-"""
-        self.console.print(banner)
-        self.console.print()
-    
-    def print_date_processing(self, date_str):
-        """Print current date being processed"""
-        self.console.print(f"[cyan]>> Processing: {date_str}[/cyan]")
-    
-    def print_daily_stats(self, label, count):
-        """
-        Print daily collection stats with clean alignment
+            activity = ""
         
-        Args:
-            label: Stat label (e.g., 'Fixtures', 'Teams updated')
-            count: Number to display
-        """
-        self.console.print(f"   {label:.<15}: {count:>6,}")
-    
-    def print_completion_banner(self, mode, runtime):
-        """
-        Print completion banner
+        # Combine everything
+        display = header_text + "\n" + activity
         
-        Args:
-            mode: 'comprehensive' or 'daily'
-            runtime: timedelta object
-        """
+        return display, stats_table
+    
+    def create_progress_bar(self, current, total, description="Progress"):
+        """Create animated progress bar"""
+        if total == 0:
+            return ""
+        
+        percentage = (current / total * 100)
+        filled = int(40 * current / total)
+        bar = '█' * filled + '░' * (40 - filled)
+        
+        return f"\n[cyan]{description}[/cyan]  [{bar}]  {percentage:5.1f}%  ({current}/{total})\n"
+    
+    def show_startup_banner(self, mode):
+        """Show enhanced startup banner"""
         if mode == 'comprehensive':
             banner = """
-[bold green]+===============================================================+
-|        COMPREHENSIVE COLLECTION COMPLETE                     |
-+===============================================================+[/bold green]
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║     ███████╗ ██████╗  ██████╗ ████████╗██████╗  █████╗ ██╗      ║
+║     ██╔════╝██╔═══██╗██╔═══██╗╚══██╔══╝██╔══██╗██╔══██╗██║      ║
+║     █████╗  ██║   ██║██║   ██║   ██║   ██████╔╝███████║██║      ║
+║     ██╔══╝  ██║   ██║██║   ██║   ██║   ██╔══██╗██╔══██║██║      ║
+║     ██║     ╚██████╔╝╚██████╔╝   ██║   ██████╔╝██║  ██║███████╗ ║
+║     ╚═╝      ╚═════╝  ╚═════╝    ╚═╝   ╚═════╝ ╚═╝  ╚═╝╚══════╝ ║
+║                                                                  ║
+║              DATA COLLECTOR - COMPREHENSIVE MODE                 ║
+║                                                                  ║
+║              Collecting: 2025-01-01 --> Today                    ║
+║              Estimated Runtime: 2-3 days                         ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
 """
-            self.console.print(banner)
-            self.console.print(f"\nSwitching to DAILY mode for future runs...")
-            self.console.print(f"Runtime: {runtime}\n")
         else:
-            self.console.print("\n[bold green]*** DAILY COLLECTION COMPLETE ***[/bold green]")
-            self.console.print(f"Runtime: {runtime}\n")
-    
-    def print_error(self, message):
-        """Print error message"""
-        self.console.print(f"[red]ERROR: {message}[/red]")
-    
-    def print_warning(self, message):
-        """Print warning message"""
-        self.console.print(f"[yellow]WARNING: {message}[/yellow]")
-    
-    def print_success(self, message):
-        """Print success message"""
-        self.console.print(f"[green]SUCCESS: {message}[/green]")
-    
-    def print_info(self, message):
-        """Print info message"""
-        self.console.print(f"[cyan]INFO: {message}[/cyan]")
-    
-    def print_separator(self):
-        """Print separator line"""
-        self.console.print("=" * 64, style="dim")
-    
-    def print_progress_summary(self, current, total, elapsed_time):
-        """
-        Print progress summary during comprehensive collection
+            banner = """
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║              FOOTBALL DATA COLLECTOR                             ║
+║              DAILY UPDATE MODE                                   ║
+║                                                                  ║
+║              Collecting Today's Matches + Updates                ║
+║              Estimated Runtime: 5-10 minutes                     ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
         
-        Args:
-            current: Current item number
-            total: Total items
-            elapsed_time: Time elapsed so far
-        """
-        percentage = (current / total * 100) if total > 0 else 0
+        self.console.print(banner, style="bold cyan")
+        self.console.print()
+    
+    def show_completion_banner(self, mode, runtime, stats):
+        """Show enhanced completion banner"""
+        hours = int(runtime.total_seconds() / 3600)
+        minutes = int((runtime.total_seconds() % 3600) / 60)
         
-        # Simple progress bar
-        bar_width = 40
-        filled = int(bar_width * current / total) if total > 0 else 0
-        bar = '█' * filled + '░' * (bar_width - filled)
+        if mode == 'comprehensive':
+            banner = f"""
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║              ✓✓✓ COMPREHENSIVE COLLECTION COMPLETE ✓✓✓          ║
+║                                                                  ║
+║              Runtime: {hours:02d}h {minutes:02d}m                                    ║
+║                                                                  ║
+║              Final Statistics:                                   ║
+║              - Fixtures: {stats['fixtures']:,}                   
+║              - Team Matches: {stats['team_matches']:,}           
+║              - Match Statistics: {stats['match_stats']:,}        
+║                                                                  ║
+║              >>> Switching to DAILY mode for future runs <<<    ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
+        else:
+            banner = f"""
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║              ✓✓✓ DAILY COLLECTION COMPLETE ✓✓✓                  ║
+║                                                                  ║
+║              Runtime: {minutes:02d}m                                         ║
+║              Updates: {stats['fixtures']} fixtures, {stats['match_stats']} match stats     ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
         
-        self.console.print(f"\nProgress  [{bar}]  {percentage:.0f}%  {elapsed_time}", style="cyan")
+        self.console.print(banner, style="bold green")
+    
+    def show_error(self, message):
+        """Show error with visual emphasis"""
+        self.console.print(f"\n[bold red]!!! ERROR !!![/bold red]")
+        self.console.print(f"[red]{message}[/red]\n")
+    
+    def show_warning(self, message):
+        """Show warning"""
+        self.console.print(f"[yellow]⚠ WARNING: {message}[/yellow]")
+    
+    def show_success(self, message):
+        """Show success"""
+        self.console.print(f"[green]✓ {message}[/green]")
+    
+    def show_processing_date(self, date_str, batch_num=None, total_batches=None):
+        """Show date being processed with visual indicator"""
+        if batch_num and total_batches:
+            self.console.print(f"\n[cyan]>>> [{batch_num}/{total_batches}] Processing: {date_str}[/cyan]")
+        else:
+            self.console.print(f"\n[cyan]>>> Processing: {date_str}[/cyan]")
+    
+    def show_stage(self, stage_name, items_count=None):
+        """Show current stage"""
+        if items_count:
+            self.console.print(f"[yellow]▶ {stage_name}: {items_count} items[/yellow]")
+        else:
+            self.console.print(f"[yellow]▶ {stage_name}[/yellow]")
+    
+    def show_stage_complete(self, stage_name, count):
+        """Show stage completion"""
+        self.console.print(f"[green]✓ {stage_name}: {count:,} collected[/green]")
 
 
-# Create global instance
-display = RetroDisplay()
+# Global instance
+display = EnhancedRetroDisplay()
 
 
 # Convenience functions
-def clear_screen():
-    """Clear the console"""
-    display.clear()
+def show_startup_banner(mode):
+    """Show startup banner"""
+    display.show_startup_banner(mode)
 
 
-def show_header(mode, runtime_hours, runtime_minutes, dates_processed, dates_failed):
-    """Show header"""
-    display.print_header(mode, runtime_hours, runtime_minutes, dates_processed, dates_failed)
+def create_live_dashboard(mode, stats, today_stats, current_date=None, total_days=0):
+    """Create live dashboard"""
+    return display.create_live_dashboard(mode, stats, today_stats, current_date, total_days)
 
 
-def show_stats(stats, today_stats):
-    """Show statistics table"""
-    display.print_stats_table(stats, today_stats)
+def create_progress_bar(current, total, description="Progress"):
+    """Create progress bar"""
+    return display.create_progress_bar(current, total, description)
 
 
-def show_mode_banner(mode):
-    """Show mode banner"""
-    display.print_mode_banner(mode)
-
-
-def show_date_processing(date_str):
-    """Show date being processed"""
-    display.print_date_processing(date_str)
-
-
-def show_daily_stat(label, count):
-    """Show daily stat line"""
-    display.print_daily_stats(label, count)
-
-
-def show_completion(mode, runtime):
+def show_completion_banner(mode, runtime, stats):
     """Show completion banner"""
-    display.print_completion_banner(mode, runtime)
+    display.show_completion_banner(mode, runtime, stats)
 
 
 def show_error(message):
     """Show error"""
-    display.print_error(message)
+    display.show_error(message)
 
 
 def show_warning(message):
     """Show warning"""
-    display.print_warning(message)
+    display.show_warning(message)
 
 
 def show_success(message):
     """Show success"""
-    display.print_success(message)
+    display.show_success(message)
 
 
-def show_info(message):
-    """Show info"""
-    display.print_info(message)
+def show_processing_date(date_str, batch_num=None, total_batches=None):
+    """Show processing date"""
+    display.show_processing_date(date_str, batch_num, total_batches)
 
 
-def show_separator():
-    """Show separator line"""
-    display.print_separator()
+def show_stage(stage_name, items_count=None):
+    """Show stage"""
+    display.show_stage(stage_name, items_count)
 
 
-def show_progress(current, total, elapsed):
-    """Show progress summary"""
-    display.print_progress_summary(current, total, elapsed)
+def show_stage_complete(stage_name, count):
+    """Show stage complete"""
+    display.show_stage_complete(stage_name, count)
