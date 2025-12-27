@@ -43,15 +43,15 @@ class FootballUI:
         self.last_latency = latency_ms
     
     def create_progress_bar(self, current, total, width=15):
-        """Create visual progress bar - block style"""
+        """Create visual progress bar - ASCII only for compatibility"""
         if total == 0:
-            return "░" * width
+            return "-" * width
         
         filled = int(width * current / total)
         empty = width - filled
         
-        # Use blocks: █ for filled, ░ for empty
-        return "█" * filled + "░" * empty
+        # Use ASCII: # for filled, - for empty
+        return "#" * filled + "-" * empty
     
     def show_startup_banner(self, mode):
         """Show startup banner"""
@@ -75,9 +75,18 @@ class FootballUI:
         console.print(banner, style="bold cyan")
     
     def create_dashboard(self, cumulative_stats, daily_stats, runtime, 
-                        current_date=None, current_stage=None,
-                        stage_progress=None, total_days=0, days_completed=0):
-        """Create full-screen dashboard"""
+                        current_activity, total_days):
+        """
+        Create full-screen dashboard with current activity boxes
+        current_activity format:
+        {
+            'phase': 1-4,
+            'fixtures': {'current': 'date', 'total': X, 'done': Y},
+            'teams': {'current': 'team_name', 'total': X, 'done': Y},
+            'match_stats': {'current': 'match_name', 'total': X, 'done': Y},
+            'player_stats': {'current': 'match_name', 'total': X, 'done': Y}
+        }
+        """
         
         # Calculate runtime
         hours = int(runtime.total_seconds() / 3600)
@@ -92,15 +101,9 @@ class FootballUI:
         players_rate = (daily_stats['player_stats'] / runtime_secs * 60) if daily_stats['player_stats'] > 0 else 0
         
         # Calculate ETA
-        if days_completed > 0 and runtime_secs > 0:
-            days_remaining = total_days - days_completed
-            avg_time_per_day = runtime_secs / days_completed
-            eta_seconds = days_remaining * avg_time_per_day
-            eta_hours = int(eta_seconds / 3600)
-            eta_minutes = int((eta_seconds % 3600) / 60)
-            eta_str = f"~{eta_hours}h {eta_minutes}m"
-        else:
-            eta_str = "Calculating..."
+        phase = current_activity.get('phase', 1)
+        phase_names = {1: 'Fixtures', 2: 'Teams', 3: 'Match Stats', 4: 'Player Stats'}
+        current_phase = phase_names.get(phase, 'Unknown')
         
         # Get system health
         cpu_percent = psutil.cpu_percent(interval=0.1)
@@ -115,11 +118,12 @@ class FootballUI:
             Layout(name="header", size=3),
             Layout(name="upper", size=6),
             Layout(name="middle", size=11),
+            Layout(name="detail", size=8),
             Layout(name="bottom", size=10)
         )
         
         # HEADER
-        header_text = f"FOOTBALL DATA COLLECTOR - SOFASCORE | ⏱ {hours:02d}:{minutes:02d}:{seconds:02d} | {current_stage or 'Init'} | ETA {eta_str}"
+        header_text = f"FOOTBALL DATA COLLECTOR - SOFASCORE | ⏱ {hours:02d}:{minutes:02d}:{seconds:02d} | Phase {phase}: {current_phase}"
         layout["header"].update(Panel(header_text, style="bold cyan"))
         
         # UPPER: System Health + Progress
@@ -135,27 +139,15 @@ LAT {self.create_progress_bar(min(int(self.last_latency), 1000), 1000, 10)} {sel
         
         layout["health"].update(Panel(health_content, title="SYSTEM HEALTH", border_style="green"))
         
-        # Progress
-        overall_pct = (days_completed / total_days * 100) if total_days > 0 else 0
-        today_count = sum(daily_stats.values()) - daily_stats.get('dates_processed', 0) - daily_stats.get('dates_failed', 0)
+        # Progress - Overall stats
+        progress_content = f"""FIXTURES:  {cumulative_stats['fixtures']:>8,}  (+{daily_stats['fixtures']:<6,})  {fix_rate:>5.1f}/m
+TEAMS:     {cumulative_stats['team_matches']:>8,}  (+{daily_stats['team_matches']:<6,})  {match_rate:>5.1f}/m
+STATS:     {cumulative_stats['match_stats']:>8,}  (+{daily_stats['match_stats']:<6,})  {stats_rate:>5.1f}/m
+PLAYERS:   {cumulative_stats['player_stats']:>8,}  (+{daily_stats['player_stats']:<6,})  {players_rate:>5.1f}/m"""
         
-        stage_current = stage_progress.get('current', 0) if stage_progress else 0
-        stage_total = stage_progress.get('total', 1) if stage_progress else 1
+        layout["progress"].update(Panel(progress_content, title="COLLECTION SUMMARY", border_style="yellow"))
         
-        progress_content = f"""OVERALL {self.create_progress_bar(days_completed, total_days, 15)} {days_completed:4} / {total_days}
-TODAY   {self.create_progress_bar(today_count, 200, 15)} +{today_count:4}
-STAGE   {self.create_progress_bar(stage_current, stage_total, 15)} {stage_current:4} / {stage_total}
-ETA     {self.create_progress_bar(days_completed, total_days, 15)} {eta_str}"""
-        
-        layout["progress"].update(Panel(progress_content, title="PROGRESS", border_style="yellow"))
-        
-        # MIDDLE: Entities + Quality
-        layout["middle"].split_column(
-            Layout(name="entities", size=8),
-            Layout(name="quality", size=3)
-        )
-        
-        # Entities
+        # MIDDLE: Entities
         entities_table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
         entities_table.add_column("Entity", style="cyan", width=15)
         entities_table.add_column("Bar", width=20)
@@ -197,13 +189,56 @@ ETA     {self.create_progress_bar(days_completed, total_days, 15)} {eta_str}"""
             f"{players_rate:.1f}/m"
         )
         
-        layout["entities"].update(Panel(entities_table, title="ENTITY COLLECTION STATUS", border_style="cyan"))
+        layout["middle"].update(Panel(entities_table, title="ENTITY COLLECTION STATUS", border_style="cyan"))
+        
+        # DETAIL: 4 boxes showing current activity for each entity type
+        layout["detail"].split_row(
+            Layout(name="fix_box"),
+            Layout(name="team_box"),
+            Layout(name="match_box"),
+            Layout(name="player_box")
+        )
+        
+        # Fixtures box
+        fix_activity = current_activity.get('fixtures', {})
+        fix_current = fix_activity.get('current', '')
+        fix_done = fix_activity.get('done', 0)
+        fix_total = fix_activity.get('total', 0)
+        fix_pct = (fix_done / fix_total * 100) if fix_total > 0 else 0
+        fix_bar = self.create_progress_bar(fix_done, fix_total, 10)
+        fix_content = f"{fix_bar}\n{fix_done}/{fix_total}\n{fix_current[:15]}" if fix_current else f"{fix_bar}\n{fix_done}/{fix_total}\nWaiting..."
+        layout["fix_box"].update(Panel(fix_content, title="FIXTURES", border_style="cyan" if phase == 1 else "dim"))
+        
+        # Teams box
+        team_activity = current_activity.get('teams', {})
+        team_current = team_activity.get('current', '')
+        team_done = team_activity.get('done', 0)
+        team_total = team_activity.get('total', 0)
+        team_bar = self.create_progress_bar(team_done, team_total, 10)
+        team_content = f"{team_bar}\n{team_done}/{team_total}\n{team_current[:15]}" if team_current else f"{team_bar}\n{team_done}/{team_total}\nWaiting..."
+        layout["team_box"].update(Panel(team_content, title="TEAMS", border_style="yellow" if phase == 2 else "dim"))
+        
+        # Match Stats box
+        match_activity = current_activity.get('match_stats', {})
+        match_current = match_activity.get('current', '')
+        match_done = match_activity.get('done', 0)
+        match_total = match_activity.get('total', 0)
+        match_bar = self.create_progress_bar(match_done, match_total, 10)
+        match_content = f"{match_bar}\n{match_done}/{match_total}\n{match_current[:15]}" if match_current else f"{match_bar}\n{match_done}/{match_total}\nWaiting..."
+        layout["match_box"].update(Panel(match_content, title="MATCH STATS", border_style="green" if phase == 3 else "dim"))
+        
+        # Player Stats box
+        player_activity = current_activity.get('player_stats', {})
+        player_current = player_activity.get('current', '')
+        player_done = player_activity.get('done', 0)
+        player_total = player_activity.get('total', 0)
+        player_bar = self.create_progress_bar(player_done, player_total, 10)
+        player_content = f"{player_bar}\n{player_done}/{player_total}\n{player_current[:15]}" if player_current else f"{player_bar}\n{player_done}/{player_total}\nWaiting..."
+        layout["player_box"].update(Panel(player_content, title="PLAYERS", border_style="magenta" if phase == 4 else "dim"))
         
         # Quality
         db_status = "✓" if cumulative_stats.get('fixtures', 0) > 0 else "!"
         quality_content = f"Dupes {self.create_progress_bar(self.duplicates, 100, 8)} {self.duplicates:3} | Fails {self.create_progress_bar(self.errors, 50, 8)} {self.errors:3} | Retries {self.create_progress_bar(self.retries, 20, 8)} {self.retries:3} | DB {db_status}"
-        
-        layout["quality"].update(Panel(quality_content, title="QUALITY & FLOW", border_style="magenta"))
         
         # BOTTOM: Live Feed
         feed_text = "\n".join(self.activity_log[-6:]) if self.activity_log else "Waiting for activity..."
@@ -231,6 +266,14 @@ ETA     {self.create_progress_bar(days_completed, total_days, 15)} {eta_str}"""
 """
         
         console.print(banner, style="bold green")
+    
+    def show_error(self, message):
+        """Show error message"""
+        console.print(f"\n[bold red]ERROR: {message}[/bold red]\n")
+    
+    def show_warning(self, message):
+        """Show warning message"""
+        console.print(f"\n[yellow]WARNING: {message}[/yellow]\n")
 
 
 # Global instance
@@ -243,11 +286,10 @@ def show_startup_banner(mode):
 
 
 def create_dashboard(cumulative_stats, daily_stats, runtime, 
-                     current_date=None, current_stage=None,
-                     stage_progress=None, total_days=0, days_completed=0):
+                     current_activity, total_days):
     return ui.create_dashboard(
         cumulative_stats, daily_stats, runtime,
-        current_date, current_stage, stage_progress, total_days, days_completed
+        current_activity, total_days
     )
 
 
@@ -273,3 +315,11 @@ def update_latency(latency_ms):
 
 def show_completion_banner(cumulative_stats, runtime):
     ui.show_completion_banner(cumulative_stats, runtime)
+
+
+def show_error(message):
+    ui.show_error(message)
+
+
+def show_warning(message):
+    ui.show_warning(message)
